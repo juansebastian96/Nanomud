@@ -1,0 +1,190 @@
+# Thermal Conductivity - Viscosity Calculation Green-Kubo Method Agua-Arcilla-KCl-NM_400K_6.805Atm
+clear
+
+# ----- Initial Settings -----
+variable        dt equal 1
+variable        T equal 400
+variable        P equal 6.805
+variable        nfrequ0 index 3000
+variable        nfrequ1 index 2500                                           
+variable        nfrequ2 index 25000                                          
+variable        nfrequ3 index 135000                                          
+variable        nstep1 equal 5000                                         
+variable        nstep2 equal 50000                                         
+variable        nstep3 equal 675000                                                                                                                            
+variable        tdamp equal ${dt}*5                                       
+variable        pdamp equal ${dt}*50 
+
+# ----- Structure Settings -----
+units           real  
+dimension       3  
+boundary        p p p  
+atom_style      full  
+
+# ----- Potential Settings -----
+pair_style      lj/cut/coul/long 15 15
+special_bonds   lj/coul 0.0 0.0 0.0
+pair_modify     mix arithmetic tail yes
+bond_style      harmonic
+angle_style     harmonic
+dihedral_style  opls
+improper_style  harmonic
+
+#----- Read structure ---------
+read_data       Agua_Grafeno_Cubic180.dat extra/atom/types 13 extra/bond/types 4 extra/angle/types 4 extra/dihedral/types 3 extra/improper/types 2
+#read_data      Agua_Silica_Cubic180.dat extra/atom/types 18 extra/bond/types 4 extra/angle/types 5 # total 18 at, 4b, 5a
+read_data       Arcilla_Cubic180.dat add append offset 2 1 1 0 0 shift 0.0 0.0 0.0  
+read_data       KCl_Cubic180.dat add append offset 11 3 3 0 0 shift 0.0 0.0 0.0  
+#read_data      NM_Silica_Cubic180.dat add append offset 13 3 3 0 0 shift 0.0 0.0 0.0 
+read_data       NM_Grafeno_Cubic180.dat add append offset 13 3 3 0 0 shift 0.0 0.0 0.0 
+
+replicate       1 1 1
+kspace_style    pppm 1e-4
+neighbor        5.0 bin
+neigh_modify    delay 0 every 1 check yes page 150000 one 10000 
+
+# ----- Convert From LAMMPS Real Units To SI -----
+variable        kB equal 1.3806504e-23                      
+variable        atm2Pa equal 101325.0
+variable        A2m equal 1.0e-10
+variable        fs2s equal 1.0e-15
+variable        convert equal ${atm2Pa}*${atm2Pa}*${fs2s}*${A2m}*${A2m}*${A2m}
+variable        kCal2J equal 4186.0/6.02214e23
+variable        convert2 equal ${kCal2J}*${kCal2J}/${fs2s}/${A2m}
+
+# ----- Variable Definition -----
+variable        temp equal temp
+variable        press equal press
+variable        pe equal pe
+variable        ke equal ke
+variable        etotal equal etotal
+variable        evdwl  equal evdwl
+variable        ecoul  equal ecoul
+variable        density equal density
+variable        vol equal vol
+variable        lx equal lx
+variable        ly equal ly
+variable        lz equal lz
+variable        V equal vol
+variable        p equal 50
+variable        s equal 135       
+variable        d equal $p*$s    
+variable    	p2 equal 25
+variable    	s2 equal 5       
+variable    	d2 equal $p2*$s2 
+
+# ----- Output Setting Screen -----
+timestep        ${dt}
+thermo_style    custom cpu step spcpu atoms temp press pe ke etotal evdwl ecoul ebond eangle vol density lx ly lz
+thermo          ${nfrequ0}
+
+# ----- Output setting file -----  
+dump            d1 all image ${nfrequ0} D2.dump.*.jpg type type                                                          
+dump            d2 all custom ${nfrequ0} D2.boximage.lammpstrj id type x y z vx vy vz fx fy fz 
+
+#############################
+# ----- Minimize energy -----
+#############################
+print "----- Minimization Start -----"
+minimize        1.0e-10 1.0e-10 30000 30000              
+#write_data     D2.minimize.dat                                                                                 
+print "----- Minimization End -----"
+
+# ----- Output setting file -----
+undump          d1
+undump          d2
+dump            d1 all image ${nfrequ1} D22.dump.*.jpg type type                                                          
+dump            d2 all custom ${nfrequ1} D22.boximage.lammpstrj id type x y z
+
+# ----- Output setting screen -----
+thermo_style    custom cpu step atoms temp press pe ke etotal evdwl ecoul ebond eangle vol density lx ly lz
+thermo          ${nfrequ1} 
+
+velocity        all create $T 102486 mom yes rot yes dist gaussian
+#fix            SHAKE all shake 1e-4 20 0 b 1 2 3 a 1 2 3 # Lodo base
+#fix            SHAKE all shake 1e-4 20 0 b 1 2 3 4 a 1 2 3 4 5 6 # Ox. silica
+fix             SHAKE all shake 1e-4 20 0 b 1 2 3 5 a 1 2 3 4 5 # Grafeno
+
+#########################
+# ----- Equilibrium -----
+#########################
+print "----- Equilibrium NVT start -----"
+fix             NVT all nvt temp $T $T ${tdamp} drag 0.2
+run             0
+run             ${nstep1}
+unfix           NVT
+write_data      D2.equi_nvt.dat
+
+# ----- Output setting file -----
+undump          d1
+undump          d2
+dump            d1 all image ${nfrequ2} D222.dump.*.jpg type type                                                          
+dump            d2 all custom ${nfrequ2} D222.boximage.lammpstrj id type x y z
+
+fix             AVEE all ave/time 100 1 1000 v_temp v_press file D2.thermo.profile
+
+# ----- Output setting screen -----
+thermo          ${nfrequ2}
+
+print "----- Equilibrium NPT start -----"
+fix             NPT all npt temp $T $T ${tdamp} iso $P $P ${pdamp} drag 0.2
+run             ${nstep2}
+unfix           NPT
+unfix           AVEE
+write_data      D2.equi_npt.dat
+
+undump          d1
+undump          d2
+reset_timestep  0
+
+###################
+# ----- Thermal Conductivity Production-----
+#######################
+print "----- Thermal conductivity calcullation Green-Kubo method -----"
+print "----- Thermal conductivity NVT start -----"
+
+fix             NVT all nvt temp $T $T ${tdamp} drag 0.2
+compute         myKE all ke/atom
+compute         myPE all pe/atom
+compute         myStress all stress/atom NULL virial
+compute         flux all heat/flux myKE myPE myStress
+variable        Jx equal c_flux[1]/vol
+variable        Jy equal c_flux[2]/vol
+variable        Jz equal c_flux[3]/vol
+fix             JJ all ave/correlate 5 25 125 c_flux[1] c_flux[2] c_flux[3] type auto file D2.J0Jt.dat ave running
+variable        scale2 equal ${convert2}/${kB}/$T/$T/$V*5*${dt}
+variable        k11 equal trap(f_JJ[3])*${scale2}
+variable        k22 equal trap(f_JJ[4])*${scale2}
+variable        k33 equal trap(f_JJ[5])*${scale2}
+variable        k equal (v_k11+v_k22+v_k33)/3.0
+fix             AVE2 all ave/time 125 1 125 v_temp v_press v_k file D2.thermal.profile
+
+#######################
+# ----- Viscosity Production-----
+#######################
+print "----- Viscosity Calculation Green-Kubo Method -----"
+print "----- Viscosity NVT Start -----"
+
+variable        pxy equal pxy
+variable        pxz equal pxz
+variable        pyz equal pyz
+fix             SS all ave/correlate ${s} ${p} ${d} v_pxy v_pxz v_pyz type auto file D2.S0St.dat ave running
+variable        scale equal ${convert}/(${kB}*$T)*$V*$s*${dt}
+variable        v11 equal trap(f_SS[3])*${scale}
+variable        v22 equal trap(f_SS[4])*${scale}
+variable        v33 equal trap(f_SS[5])*${scale}
+variable        v equal ((v_v11+v_v22+v_v33)/3.0)*1000
+fix             AVE all ave/time 6750 1 6750 v_temp v_press v_v file D2.visco.profile
+
+# ----- Output setting file -----
+dump         	d1 all image ${nfrequ3} D2222.dump.*.jpg type type                                                          
+dump         	d2 all custom ${nfrequ3} D2222.boximage.lammpstrj id type x y z
+
+# ----- Output setting screen -----
+thermo_style    custom cpu step temp press pe ke etotal lx v_scale v_v11 v_v22 v_v33 v_v c_vacf[4] v_vacf v_scale2 v_k11 v_k22 v_k33 v_k
+thermo          ${nfrequ3}
+
+run             ${nstep3}
+write_data      "D2.vis_lodo.dat"
+print           "average viscosity: $v [cP] @ $T K"
+print           "average conductivity: $k[W/mK] @ $T K"

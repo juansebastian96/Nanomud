@@ -1,0 +1,78 @@
+# Diffusion Calculation MSD Method Agua-Arcilla-KCl-NM_Grafeno_400K_6.805Atm
+clear
+
+# ----- Initial Settings -----
+variable        dt equal 1
+variable        T equal 400                              
+variable        nfrequ3 index 25000                                                                               
+variable        nstep3 equal 100000                                                                                                                            
+variable        tdamp equal ${dt}*5                                       
+
+# ----- Structure Settings -----
+units           real  
+dimension       3  
+boundary        p p p  
+atom_style      full  
+
+# ----- Potential Settings -----
+pair_style      lj/cut/coul/long 15 15
+special_bonds   lj/coul 0.0 0.0 0.0
+pair_modify     mix arithmetic tail yes
+bond_style      harmonic
+angle_style     harmonic
+dihedral_style  opls
+improper_style  harmonic
+
+#----- Read structure ---------
+read_data       D2.equi_npt.dat
+
+replicate       1 1 1
+kspace_style    pppm 1e-4
+neighbor        5.0 bin
+neigh_modify    delay 0 every 1 check yes page 150000 one 10000 
+
+
+# ----- Variable Definition -----
+variable        temp equal temp
+variable        press equal press
+variable        pe equal pe
+variable        ke equal ke
+variable        etotal equal etotal
+variable        evdwl  equal evdwl
+variable        ecoul  equal ecoul
+variable        density equal density
+variable        vol equal vol
+variable        lx equal lx
+variable        ly equal ly
+variable        lz equal lz
+
+# ----- Output Setting Screen -----
+timestep        ${dt}
+#fix            SHAKE all shake 1e-4 20 0 b 1 2 3 a 1 2 3 # Lodo base
+#fix            SHAKE all shake 1e-4 20 0 b 1 2 3 4 a 1 2 3 4 5 6 # Ox. silica
+fix             SHAKE all shake 1e-4 20 0 b 1 2 3 5 a 1 2 3 4 5 # Grafeno
+
+#######################
+# ----- Diffusion Coefficient Production-----
+#######################
+print "----- Diffusion MSD -----"
+print "----- Difusion MSD NVE start -----"
+
+fix 		NVE all nve 
+fix             langevin all langevin $T $T ${tdamp} 12345
+compute         msd all msd com yes
+fix             9 all vector 10 c_msd[4]
+variable        fitslope equal slope(f_9)/6/(10*dt)
+fix             AVE all ave/time 500 1 500 v_fitslope file D2.Diffusion.profile ave one
+
+# ----- Output setting file -----
+dump         	d1 all image ${nfrequ3} D2.Diffdump.*.jpg type type                                                          
+dump         	d2 all custom ${nfrequ3} D2.Diffboximage.lammpstrj id type x y z
+
+# ----- Output setting screen -----
+thermo_style    custom cpu step spcpu atoms temp press pe ke etotal vol density lx ly lz c_msd[4] v_fitslope
+thermo          ${nfrequ3}
+
+run             ${nstep3}
+write_restart   "D2.diff_lodo.res"
+write_data      D2.diff_lodo.dat
